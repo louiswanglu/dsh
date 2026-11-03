@@ -7,7 +7,12 @@
 # 解决：用 `!!js` 表达式在**加载时**从 DSH 的启动目录向上找到最近的 hooks
 # 配置。表达式只能访问 `ctx` 与 `process`，所以发现逻辑是自包含的。
 #
-# 优先级：.claude/hooks.json > .claude/settings.json > .dsh/hooks.json
+# 优先级：.dsh/hooks.json > .claude/hooks.json > .claude/settings.json
+#
+# 为什么 .dsh 优先：那个文件是「DSH 感知层」——它给每个 hook 套了
+# cc-tool-name.sh（工具名/字段归一化）和 stop-adapter.sh（Stop 契约转换）。
+# 裸 Claude Code 配置期待 CC 大小写和 CC payload，DSH 从不发送，
+# 因此先选它会让所有 hook 静默失效。
 # 若一个都找不到，configPath 为空 → 桥接插件 load 时报错并降级为“无 hooks”，
 # 这比错误套用别的仓库的规则安全。
 #
@@ -30,7 +35,12 @@
             const fs = process.getBuiltinModule('node:fs');
             const path = process.getBuiltinModule('node:path');
             const os = process.getBuiltinModule('node:os');
-            const names = ['.claude/hooks.json', '.claude/settings.json', '.dsh/hooks.json'];
+            // .dsh/hooks.json first: it is the DSH-aware layer. In this
+            // repository it wraps every hook with cc-tool-name.sh (tool-name and
+            // field normalizer) and stop-adapter.sh (Stop contract translator).
+            // The raw Claude Code config expects CC casing and the CC payload,
+            // so picking it first would fire hooks that never match.
+            const names = ['.dsh/hooks.json', '.claude/hooks.json', '.claude/settings.json'];
             let dir = path.resolve(process.env.DSH_PROJECT_DIR || process.cwd());
             const root = path.parse(dir).root;
             const home = path.resolve(os.homedir());

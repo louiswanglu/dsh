@@ -177,9 +177,35 @@ dsh: disabling profile plugin row "hooks-claude-code": ... incompatible with dsh
 `lighting-rust` 改成按仓库根解析：
 
 ```
-优先级：.claude/hooks.json > .claude/settings.json > .dsh/hooks.json
+优先级：.dsh/hooks.json > .claude/hooks.json > .claude/settings.json
 边界：  从启动目录向上最多 8 层，遇到用户 home 即停止
 ```
+
+**为什么 `.dsh` 必须排第一**（第一版排反了，差点造成静默失效）：
+`lighting-rust` 里两个配置文件都有，但职责完全不同——
+
+| 文件 | matcher | 是否套适配器 | DSH 下能否命中 |
+|---|---|---|---|
+| `.dsh/hooks.json` | `edit\|write`、`bash\|terminal_send` | ✅ `cc-tool-name.sh` + `stop-adapter.sh` | ✅ |
+| `.claude/settings.json` | `Edit\|Write`、`Bash` | ❌ 裸 CC 约定 | ❌ 全部不命中 |
+
+DSH 发的是小写工具名，`.claude` 的 matcher 是 CC 大小写，**永远匹配不上**。
+更危险的是 `terminal_send` 把命令放在 `tool_input.text`，裸 `bash-guard.sh`
+读 `tool_input.command` 读不到。
+
+实测对照（同一份危险命令 `rm -rf /`）：
+
+```
+$ echo '{"tool_name":"terminal_send","tool_input":{"text":"rm -rf /"}}' | .claude/hooks/bash-guard.sh
+EXIT 0      ← 放行，漏洞
+
+$ echo '{"tool_name":"terminal_send","tool_input":{"text":"rm -rf /"}}' | .dsh/hooks/cc-tool-name.sh .claude/hooks/bash-guard.sh
+BLOCKED: 禁止删除根目录或用户目录
+EXIT 2      ← 正确拦截
+```
+
+所以如果发现逻辑先命中 `.claude/settings.json`，所有 guard 会**看起来已加载、
+实际全部失效**——这比没装 hooks 更糟，因为它给人虚假的安全感。
 
 **为什么要停在家目录**：`~/.claude/settings.json` 是用户全局偏好，
 不是某个仓库的策略。最初的实现会把全局 hooks 套用到所有仓库，这是错的。
