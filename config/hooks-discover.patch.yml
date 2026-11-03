@@ -1,0 +1,53 @@
+# Hooks 配置自动发现 / Per-repository hook config discovery
+#
+# 问题：`dsh-hooks-claude-code` 的 `configPath` 是必填的绝对路径，且只在插件
+# 加载时读取一次（不监听任何重载信号）。把它硬编码成某个仓库的路径，意味着
+# 在其它仓库里要么完全失效，要么错误地套用那个仓库的拦截规则。
+#
+# 解决：用 `!!js` 表达式在**加载时**从 DSH 的启动目录向上找到最近的 hooks
+# 配置。表达式只能访问 `ctx` 与 `process`，所以发现逻辑是自包含的。
+#
+# 优先级：.claude/hooks.json > .claude/settings.json > .dsh/hooks.json
+# 若一个都找不到，configPath 为空 → 桥接插件 load 时报错并降级为“无 hooks”，
+# 这比错误套用别的仓库的规则安全。
+#
+# Problem: the bridge's `configPath` is a required absolute path read once at
+# load, with no reload signal. Hardcoding one repository's path means every other
+# repository either has no hooks or silently inherits the wrong ones.
+#
+# Fix: resolve the nearest hooks config at load time from the DSH launch
+# directory. If none exists the path stays empty, the bridge logs it and
+# registers no hooks — safer than applying another repository's rules.
+- insert:
+    - id: hooks-claude-code
+      name: "@deepseek-ai/dsh-hooks-claude-code"
+      config:
+        configPath: !!js |-
+          (() => {
+            // `!!js` evaluates inside `new Function`, so `require` is not in
+            // scope. process.getBuiltinModule is the synchronous builtin access
+            // that survives that context without an import.
+            const fs = process.getBuiltinModule('node:fs');
+            const path = process.getBuiltinModule('node:path');
+            const os = process.getBuiltinModule('node:os');
+            const names = ['.claude/hooks.json', '.claude/settings.json', '.dsh/hooks.json'];
+            let dir = path.resolve(process.env.DSH_PROJECT_DIR || process.cwd());
+            const root = path.parse(dir).root;
+            const home = path.resolve(os.homedir());
+            for (let depth = 0; depth < 8; depth += 1) {
+              // Stop before the user's home: a global ~/.claude/settings.json is
+              // a user preference, not this repository's policy.
+              if (dir === home) break;
+              for (const name of names) {
+                const candidate = path.join(dir, name);
+                if (fs.existsSync(candidate)) return candidate;
+              }
+              const parent = path.dirname(dir);
+              if (parent === dir || dir === root) break;
+              dir = parent;
+            }
+            return '';
+          })()
+        # projectDir 留空 → 桥接插件用会话 workspace，`${CLAUDE_PROJECT_DIR}` 随会话走。
+        # Omitted projectDir: the bridge follows each session's workspace instead.
+        defaultTimeoutMs: 600000

@@ -154,10 +154,44 @@ token，所以 `place`、`order`、`getOrderBookSnapshot` 的任何组成部分�
 这个缺陷是**写 skill 时验证第 1 步才发现的**——单测和之前的真实仓库测试都没覆盖
 camelCase 符号。
 
+## 第五轮：修版本不兼容 + hooks 自动发现
+
+### 5.1 版本不兼容（先修，因为它是阻塞项）
+
+启动日志一直在报四个插件被禁用：
+
+```
+dsh: disabling profile plugin row "hooks-claude-code": ... incompatible with dsh 0.2.1-rc.5
+```
+
+**根因**不是插件版本旧，而是 profile 的 `pnpm-workspace.yaml` 里
+`autoInstallPeers: false`：它让 peer 依赖停留在 lockfile 里的旧版本，
+所以 `pnpm.overrides` 只改顶层 spec 根本推不动传递依赖。
+
+修复：打开 `autoInstallPeers`，把 76 个官方包统一 pin 到 `0.2.1-rc.5`，
+删掉 lockfile 重新解析。结果：**rc.2 引用归零，不兼容警告 0 条，被禁用插件 0 个**。
+
+### 5.2 hooks 自动发现
+
+`config/hooks-discover.patch.yml` 把 `configPath` 从硬编码
+`lighting-rust` 改成按仓库根解析：
+
+```
+优先级：.claude/hooks.json > .claude/settings.json > .dsh/hooks.json
+边界：  从启动目录向上最多 8 层，遇到用户 home 即停止
+```
+
+**为什么要停在家目录**：`~/.claude/settings.json` 是用户全局偏好，
+不是某个仓库的策略。最初的实现会把全局 hooks 套用到所有仓库，这是错的。
+
+**实现约束**：`!!js` 在 `new Function` 里求值，**没有 `require`**。
+必须用 `process.getBuiltinModule('node:fs')` 同步取内置模块。
+（第一版用了 `require`，真实启动直接 `ReferenceError`。）
+
+实测：从 lighting-rust 启动 → 绑定它的 `.claude/settings.json`；
+从其它仓库启动 → 无 hooks、零报错、优雅降级。
+
 ## 下一步（尚未做）
 
-按 ROI 排序：
-
-1. **hooks 自动发现** —— 把 `hooks-claude-code` 从硬编码 `lighting-rust` 改为按仓库根发现
-2. **模型分工** —— 默认走便宜模型，plan/review 走强模型
-3. **行内补全** —— Monaco 侧接编辑预测（补 A4），投入产出比最低
+1. **模型分工** —— 默认走便宜模型，plan/review 走强模型
+2. **行内补全** —— Monaco 侧接编辑预测（补 A4），投入产出比最低
