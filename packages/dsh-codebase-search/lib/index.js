@@ -29,6 +29,9 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'codebase-search'
 
+/** Bump when the on-disk index layout changes; an older index is dropped and rebuilt. */
+export const SCHEMA_VERSION = 2
+
 /** Services required before the tools can run. */
 export const inject = ['tools']
 
@@ -184,6 +187,40 @@ function wholeFileChunk(lines, maxChars) {
     endLine: lines.length,
     body: body.length > maxChars ? body.slice(0, maxChars) : body,
   }]
+}
+
+/**
+ * Split an identifier into its constituent words.
+ *
+ * FTS5's unicode tokenizer keeps `placeOrder` as one token, so a search for
+ * "place order" would never match it. Every identifier is therefore indexed a
+ * second time with its parts separated: `placeOrder` -> `place order`,
+ * `HTTPServer` -> `HTTP Server`, `parse_snapshot` -> `parse snapshot`.
+ *
+ * @param {string} identifier - a symbol name.
+ * @returns {string} the space-separated parts, lowercased.
+ */
+export function expandIdentifier(identifier) {
+  if (typeof identifier !== 'string' || identifier.length === 0) return ''
+  return identifier
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/[_$.]+/g, ' ')
+    .toLowerCase()
+    .trim()
+}
+
+/**
+ * Expand identifiers inside a code body so camelCase and snake_case both match.
+ * Only token-shaped runs are touched; punctuation and whitespace are preserved.
+ * @param {string} body - the chunk body.
+ * @returns {string} the body with identifier parts separated.
+ */
+export function expandBodyTokens(body) {
+  return body.replace(/[A-Za-z_$][\w$]*/g, (token) => {
+    const expanded = expandIdentifier(token)
+    return expanded === token.toLowerCase() ? token : `${token} ${expanded}`
+  })
 }
 
 /**
@@ -432,6 +469,15 @@ export class CodebaseIndex {
       // in a repository that never used DSH before.
       await mkdir(dirname(this.path), { recursive: true })
       const db = new DatabaseSync(this.path)
+      // A schema change (for example adding `search_text`) must invalidate an
+      // existing index rather than failing at query time: the store is derived
+      // and disposable, so the cheapest correct migration is a rebuild.
+      const version = db.prepare('PRAGMA user_version').get().user_version
+      if (version !== SCHEMA_VERSION) {
+        db.exec('DROP TABLE IF EXISTS chunks; DROP TABLE IF EXISTS files;')
+        db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`)
+        this.lastRefresh = 0
+      }
       db.exec(`
         PRAGMA journal_mode = WAL;
         CREATE TABLE IF NOT EXISTS files (
@@ -443,6 +489,7 @@ export class CodebaseIndex {
           path UNINDEXED,
           symbol,
           body,
+          search_text,
           start_line UNINDEXED,
           end_line UNINDEXED,
           language UNINDEXED,
@@ -482,7 +529,7 @@ export class CodebaseIndex {
     const seen = new Set()
     const insertFile = db.prepare('INSERT OR REPLACE INTO files(path, fingerprint, indexed_at) VALUES(?,?,?)')
     const insertChunk = db.prepare(
-      'INSERT INTO chunks(path, symbol, body, start_line, end_line, language, is_test) VALUES(?,?,?,?,?,?,?)',
+      'INSERT INTO chunks(path, symbol, body, search_text, start_line, end_line, language, is_test) VALUES(?,?,?,?,?,?,?,?)',
     )
     const deleteChunks = db.prepare('DELETE FROM chunks WHERE path = ?')
     const deleteFile = db.prepare('DELETE FROM files WHERE path = ?')
@@ -525,7 +572,16 @@ export class CodebaseIndex {
         for (const chunk of chunkSource(text, language, this.options.maxChars ?? 8000)) {
           const inTestModule = testSpan !== null && chunk.startLine >= testSpan.start && chunk.startLine <= testSpan.end
           const isTest = fileIsTest || inTestModule || chunkIsTest(chunk, language) ? 1 : 0
-          insertChunk.run(relativePath, chunk.symbol, chunk.body, chunk.startLine, chunk.endLine, language, isTest)
+          insertChunk.run(
+            relativePath,
+            chunk.symbol,
+            chunk.body,
+            expandIdentifier(chunk.symbol) + '\n' + expandBodyTokens(chunk.body),
+            chunk.startLine,
+            chunk.endLine,
+            language,
+            isTest,
+          )
         }
         insertFile.run(relativePath, fingerprint, now)
         added += 1
@@ -562,7 +618,7 @@ export class CodebaseIndex {
     return db.prepare(`
       SELECT path AS file, symbol, body, start_line, end_line, language,
              is_test,
-             bm25(chunks, 1.0, 4.0) + (is_test * 3.0) AS score
+             bm25(chunks, 1.0, 4.0, 2.0) + (is_test * 3.0) AS score
       FROM chunks
       WHERE chunks MATCH ?
       ORDER BY score

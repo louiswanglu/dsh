@@ -99,3 +99,42 @@ test('fingerprintOf changes with content identity', () => {
   assert.equal(a, b)
   assert.notEqual(a, c)
 })
+
+test('expandIdentifier splits camelCase, PascalCase, and snake_case', async () => {
+  const { expandIdentifier, expandBodyTokens } = await import('../lib/index.js')
+  assert.equal(expandIdentifier('placeOrder'), 'place order')
+  assert.equal(expandIdentifier('HTTPServer'), 'http server')
+  assert.equal(expandIdentifier('parse_snapshot'), 'parse snapshot')
+  assert.equal(expandIdentifier('getOrderBookSnapshot'), 'get order book snapshot')
+  assert.equal(expandIdentifier(''), '')
+  // Body expansion keeps the original token so exact searches still work.
+  const body = expandBodyTokens('const placeOrder = 1')
+  assert.match(body, /placeOrder/)
+  assert.match(body, /place order/)
+})
+
+test('camelCase symbols are reachable by their word parts', async () => {
+  const { CodebaseIndex } = await import('../lib/index.js')
+  const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const root = await mkdtemp(join(tmpdir(), 'cbi-camel-'))
+  await mkdir(join(root, 'src'), { recursive: true })
+  await writeFile(join(root, 'src', 'order.ts'),
+    'export function placeOrder(qty: number): number {\n  return qty\n}\n')
+  const index = new CodebaseIndex(join(root, 'i.sqlite'), {
+    refreshMs: 0, maxFiles: 100, maxFileBytes: 1 << 20, exclude: [],
+  })
+  try {
+    await index.refresh(root, new AbortController().signal)
+    // `quantity` is deliberately absent: the parameter is named `qty`, and a
+    // literal index has no business inventing synonyms for it.
+    for (const q of ['place order', 'order', 'placeOrder', 'qty']) {
+      const rows = await index.search(q, 5)
+      assert.ok(rows.some((r) => r.symbol === 'placeOrder'), `"${q}" must find placeOrder`)
+    }
+  } finally {
+    await index.close()
+    await rm(root, { recursive: true, force: true })
+  }
+})

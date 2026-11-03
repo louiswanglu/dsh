@@ -121,10 +121,43 @@ rewind_turn({turn: 1}) → Restored 1 file(s) from turn 1.
 
 实测：多轮隔离正确（turn1 还原到最初内容，turn2 还原到 turn1 结果），dry-run 不落盘，未知 turn 报明确错误。
 
+## 第四轮：把三个插件串成工作流
+
+`skills/code-change-workflow/SKILL.md` 把前三轮的能力固化成一条可复用路径：
+
+**检索定位 → 最小编辑 → 读诊断 → 必要时回滚**
+
+装到 `~/.dsh/skills/` 后，模型在处理「改多个文件 / 不熟悉的代码」时会自动加载它。
+
+端到端验证（真实 backends 跑完整四步）：
+
+```
+[1] locate:   src/order.ts:1 placeOrder              ← codebase_search
+[2+3] 编辑后自动附带诊断：
+      <lsp-diagnostics>
+      2:9 error: Type 'number' is not assignable to type 'string'.
+      </lsp-diagnostics>
+[4] rewind:   Restored 1 file(s) from turn 1.        ← rewind_turn
+      复检：0 diagnostics
+```
+
+## 第四轮修掉的一个真实缺陷
+
+**camelCase 标识符搜不到。** FTS5 的 unicode tokenizer 把 `placeOrder` 当作**一个**
+token，所以 `place`、`order`、`getOrderBookSnapshot` 的任何组成部分都匹配不上。
+
+修复：索引时额外写一列 `search_text`，把标识符拆成子词
+（`placeOrder` → `place order`，`HTTPServer` → `http server`，`parse_snapshot` →
+`parse snapshot`），同时保留原始 token 让精确搜索仍可用。索引 schema 加了
+`user_version`，旧索引自动丢弃重建。
+
+这个缺陷是**写 skill 时验证第 1 步才发现的**——单测和之前的真实仓库测试都没覆盖
+camelCase 符号。
+
 ## 下一步（尚未做）
 
 按 ROI 排序：
 
-1. **行内补全** —— Monaco 侧接编辑预测（补 A4）
-2. **hooks 自动发现** —— 把 `hooks-claude-code` 从硬编码 `lighting-rust` 改为按仓库根发现
-3. **模型分工** —— 默认走便宜模型，plan/review 走强模型
+1. **hooks 自动发现** —— 把 `hooks-claude-code` 从硬编码 `lighting-rust` 改为按仓库根发现
+2. **模型分工** —— 默认走便宜模型，plan/review 走强模型
+3. **行内补全** —— Monaco 侧接编辑预测（补 A4），投入产出比最低
