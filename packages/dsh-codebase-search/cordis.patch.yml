@@ -1,0 +1,12 @@
+# dsh-codebase-search bundle patch
+#
+# Mounts one `codebase_search` tool over a local SQLite FTS5 index of the
+# session workspace. The index is derived and disposable: it lives under
+# `<workspace>/.dsh/codebase-index.sqlite` by default and is rebuilt on demand.
+#
+# Auto-indexing is deliberately NOT started at load: a new session in a fresh
+# repository would otherwise pay a full walk before its first question. The
+# first `codebase_search` call builds what it needs and later calls reuse it.
+- insert:
+    - id: codebase-search
+      name: 'dsh-codebase-search'
