@@ -1,0 +1,13 @@
+# dsh-edit-verify bundle patch
+#
+# Mounts the edit-verify row. It listens to `tools/post-execute` and, after a
+# successful file-mutating tool call (`write`, `edit`, or `str_replace_editor`
+# create/str_replace/insert), asks the language server for diagnostics on the
+# changed file and appends them to the tool result the model sees.
+#
+# The row is inert unless `dsh-lsp-actions` is mounted: the plugin resolves
+# `lsp_diagnostics` per call, so installing this bundle without the LSP surface
+# costs nothing and produces no model-facing text.
+- insert:
+    - id: edit-verify
+      name: 'dsh-edit-verify'

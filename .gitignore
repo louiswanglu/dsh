@@ -24,3 +24,6 @@ node_modules/
 dist/
 coverage/
 .pnpm-store/
+
+# Plugin build artifacts are committed; runtime deps are not
+packages/*/node_modules/

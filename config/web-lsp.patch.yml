@@ -1,0 +1,91 @@
+# LSP servers for the web profile — replaces the rust-only table.
+#
+# Default `servers` is empty by design, so every language has to be declared
+# explicitly. Each entry pins the absolute binary path: the profile's PATH is
+# the launching shell's PATH, and `dsh web` may be started from anywhere.
+#
+# `projectMarkers` is what routes a file whose extension is claimed by more
+# than one entry: the nearest ancestor marker wins, so a nested project can
+# use a different server than its parent.
+- id: lsp-actions
+  name: dsh-lsp-actions
+  config:
+    servers:
+      # ── Rust ────────────────────────────────────────────────────────────
+      rust:
+        command: /Users/wanglu/.cargo/bin/rust-analyzer
+        extensionToLanguage:
+          .rs: rust
+        projectMarkers: ["Cargo.toml"]
+        initializationOptions:
+          checkOnSave: false
+          cargo:
+            allFeatures: false
+
+      # ── TypeScript / JavaScript ─────────────────────────────────────────
+      # One server covers .ts/.tsx/.js/.jsx/.mjs/.cjs; it resolves the
+      # workspace's own typescript package through its `tsdk` init option.
+      typescript:
+        command: /Users/wanglu/Documents/Code/dsh/.lsp-runtime/.bin/typescript-language-server
+        args: ["--stdio"]
+        extensionToLanguage:
+          .ts: typescript
+          .tsx: typescriptreact
+          .js: javascript
+          .jsx: javascriptreact
+          .mjs: javascript
+          .cjs: javascript
+        projectMarkers: ["tsconfig.json", "jsconfig.json", "package.json"]
+        initializationOptions:
+          hostInfo: "dsh-edit-verify"
+          preferences:
+            includeInlayParameterNameHints: "none"
+
+      # ── Python ──────────────────────────────────────────────────────────
+      # pyright requires an explicit transport; it reads pyproject.toml,
+      # pyrightconfig.json, and setup.py for its project layout.
+      python:
+        command: /Users/wanglu/Documents/Code/dsh/.lsp-runtime/.bin/pyright-langserver
+        args: ["--stdio"]
+        extensionToLanguage:
+          .py: python
+          .pyi: python
+        projectMarkers: ["pyproject.toml", "pyrightconfig.json", "setup.py", "requirements.txt"]
+
+      # ── Go ──────────────────────────────────────────────────────────────
+      go:
+        command: /Users/wanglu/go/bin/gopls
+        extensionToLanguage:
+          .go: go
+        projectMarkers: ["go.mod", "go.work"]
+
+      # ── C / C++ ─────────────────────────────────────────────────────────
+      # clangd discovers compile_commands.json or compile_flags.txt itself;
+      # without either it still reports syntax errors from its own parse.
+      c:
+        command: /usr/bin/clangd
+        extensionToLanguage:
+          .c: c
+          .h: c
+          .cc: cpp
+          .cpp: cpp
+          .cxx: cpp
+          .hpp: cpp
+          .hh: cpp
+        projectMarkers: ["compile_commands.json", "compile_flags.txt", "CMakeLists.txt"]
+
+    # Keep the editor half off in the Web profile: the stdio editor backend is
+    # owned by dedicated integrations, and leaving it enabled here would open a
+    # second server per language.
+    editor:
+      enabled: false
+      requestTimeoutMs: 60000
+      diagnosticsCacheMaxFiles: 128
+    maxDiagnostics: 200
+    maxCompletionItems: 20
+    maxCodeActions: 50
+    maxSymbols: 100
+    maxSignatures: 10
+    maxInlayHints: 200
+    maxResultChars: 16000
+    timeoutMs: 60000

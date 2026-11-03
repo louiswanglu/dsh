@@ -1,0 +1,36 @@
+{
+  "name": "dsh-edit-verify",
+  "version": "0.1.0",
+  "description": "Verify freshly edited files with the language server and feed diagnostics back to the model.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "import": "./lib/index.js"
+    }
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml"
+  ],
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "lsp",
+    "diagnostics"
+  ],
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.5",
+    "@deepseek-ai/dsh-tools": ">=0.2.0-0 <0.3.0-0"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.5"
+  }
+}
