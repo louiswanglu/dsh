@@ -71,11 +71,34 @@ cd packages/dsh-edit-verify && node --test test/index.test.js   # 7 项单元测
 TypeScript 类型错误、Python(pyright)、Go(gopls)、C(clangd)、干净文件不产生噪音、
 `read` 不被校验、未路由扩展名静默、语法错误、服务器崩溃不影响编辑结果。
 
+## 第二轮：符号索引检索
+
+`packages/dsh-codebase-search` 提供 `codebase_search` 工具。它把工作区切成**符号粒度的块**
+（每个函数/结构体/类/方法一块），用 SQLite FTS5 排序。`grep` 找字面量，它找**定义**。
+
+```
+### order book snapshot
+  crates/lighting-adapter/src/exchange/mexc/perpetual/exchange.rs:301  get_order_book_snapshot
+  crates/lighting-strategy/.../infrastructure/exchange_adapter.rs:63   get_order_book_snapshot
+```
+
+关键设计：
+
+| 决策 | 原因 |
+|---|---|
+| 纯本地 `node:sqlite` | Node 自带，无服务、无 embedding API、零 token |
+| 索引可弃 | 存在 `<workspace>/.dsh/codebase-index.sqlite`，删了重建即可 |
+| 增量刷新 | 按 path+size+mtime 指纹，且有 TTL，连续查询只走一次目录 |
+| 词项 OR 而非 AND | "order book snapshot" 要求三个词全中会返回空，因为函数名里没有 "book" |
+| 测试码降权不删除 | Rust 单测与实现在同一文件，所以按 chunk + 显式测试模块区间判定；按文件判会把生产代码也降权 |
+
+实测：3005 个文件 / 51744 个 chunk，冷索引 23 秒，热查询零开销。
+
 ## 下一步（尚未做）
 
 按 ROI 排序：
 
-1. **codebase 语义索引** —— 全库 embedding + 符号索引 + FTS 三路融合检索（补 A1，最大缺口）
-2. **Turn 级 rewind** —— 持久化 turn 快照 + 回滚工具（补 A5）
+1. **Turn 级 rewind** —— 持久化 turn 快照 + 回滚工具（补 A5）
+2. **行内补全** —— Monaco 侧接编辑预测（补 A4）
 3. **hooks 自动发现** —— 把 `hooks-claude-code` 从硬编码 `lighting-rust` 改为按仓库根发现
 4. **模型分工** —— 默认走便宜模型，plan/review 走强模型
