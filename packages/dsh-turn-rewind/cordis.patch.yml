@@ -1,0 +1,11 @@
+# dsh-turn-rewind bundle patch
+#
+# Snapshots every file a turn mutates BEFORE the mutation, then exposes a
+# `rewind_turn` tool that puts those files back. Snapshots live under
+# `$DSH_HOME/rewind/` and survive a Host restart, unlike in-memory diff cards.
+#
+# The row is inert until a turn edits something: recording costs one file copy
+# per path per turn, and listing turns costs one directory read.
+- insert:
+    - id: turn-rewind
+      name: 'dsh-turn-rewind'

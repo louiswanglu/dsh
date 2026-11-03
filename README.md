@@ -94,11 +94,37 @@ TypeScript 类型错误、Python(pyright)、Go(gopls)、C(clangd)、干净文件
 
 实测：3005 个文件 / 51744 个 chunk，冷索引 23 秒，热查询零开销。
 
+## 第三轮：Turn 级 rewind
+
+`packages/dsh-turn-rewind` 在每次文件写入/编辑**之前**快照旧内容，并提供 `rewind_turn` 工具还原。
+
+为什么不能用 git：工作区里常有与本次无关的未提交改动，`git checkout` 会连它们一起丢掉。
+这个插件只碰它自己记录过的路径。
+
+```
+rewind_turn()          → Turns with snapshots: 1, 2
+rewind_turn({turn: 1}) → Restored 1 file(s) from turn 1.
+                          ~ /tmp/rw/src/a.rs
+                          Deleted 1 file(s) created by that turn:
+                          - /tmp/rw/src/new.rs
+```
+
+关键设计：
+
+| 决策 | 原因 |
+|---|---|
+| 在 intent 阶段快照 | `fs/write-intent` 在写入**之前**触发，第一次捕获才是真正的 turn 前内容 |
+| 每个路径只留第一次 | 后续捕获会覆盖掉基线，把已改动内容当回滚点 |
+| 快照落盘 | 存在 `$DSH_HOME/rewind/`，Host 重启后仍可回滚（`workspace-changes` 的 diff 卡片做不到） |
+| 新建文件记为 absent | 回滚时删除它，而不只是还原内容 |
+| 不自动回滚 | 快照是惰性的，只有显式调用 `rewind_turn` 才写回 |
+
+实测：多轮隔离正确（turn1 还原到最初内容，turn2 还原到 turn1 结果），dry-run 不落盘，未知 turn 报明确错误。
+
 ## 下一步（尚未做）
 
 按 ROI 排序：
 
-1. **Turn 级 rewind** —— 持久化 turn 快照 + 回滚工具（补 A5）
-2. **行内补全** —— Monaco 侧接编辑预测（补 A4）
-3. **hooks 自动发现** —— 把 `hooks-claude-code` 从硬编码 `lighting-rust` 改为按仓库根发现
-4. **模型分工** —— 默认走便宜模型，plan/review 走强模型
+1. **行内补全** —— Monaco 侧接编辑预测（补 A4）
+2. **hooks 自动发现** —— 把 `hooks-claude-code` 从硬编码 `lighting-rust` 改为按仓库根发现
+3. **模型分工** —— 默认走便宜模型，plan/review 走强模型
