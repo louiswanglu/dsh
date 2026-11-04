@@ -110,3 +110,60 @@ test('session ids are sanitized into safe directory names', async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('prune removes turns older than the retention window', async () => {
+  const { root, store } = await fresh()
+  try {
+    await store.record('s-old', 1, '/tmp/a.rs', 'a')
+    // Backdate the old session so it falls outside a one-day window.
+    const { utimes } = await import('node:fs/promises')
+    const old = new Date(Date.now() - 10 * 86400000)
+    await utimes(join(store.dirFor('s-old', 1), 'manifest.json'), old, old)
+    await store.record('s-new', 1, '/tmp/b.rs', 'b')
+
+    const removed = await store.prune({ retainDays: 1, maxSessions: 0 })
+    assert.equal(removed.turns, 1)
+    assert.deepEqual(await store.turnsFor('s-old'), [])
+    assert.deepEqual(await store.turnsFor('s-new'), [1])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('prune keeps snapshots when the window is disabled', async () => {
+  const { root, store } = await fresh()
+  try {
+    await store.record('s1', 1, '/tmp/a.rs', 'a')
+    const removed = await store.prune({ retainDays: 0, maxSessions: 0 })
+    assert.equal(removed.turns, 0)
+    assert.deepEqual(await store.turnsFor('s1'), [1])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('prune caps the number of retained sessions, oldest first', async () => {
+  const { root, store } = await fresh()
+  try {
+    const { utimes } = await import('node:fs/promises')
+    for (let i = 0; i < 4; i += 1) {
+      await store.record(`s${i}`, 1, `/tmp/${i}.rs`, 'x')
+      const stamp = new Date(Date.now() - (10 - i) * 86400000)
+      await utimes(join(store.dirFor(`s${i}`, 1), 'manifest.json'), stamp, stamp)
+    }
+    const removed = await store.prune({ retainDays: 0, maxSessions: 2 })
+    assert.equal(removed.sessions, 2)
+    // The two oldest went; the two newest stayed.
+    assert.deepEqual((await store.turnsFor('s0')).length, 0)
+    assert.deepEqual(await store.turnsFor('s2'), [1])
+    assert.deepEqual(await store.turnsFor('s3'), [1])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('prune on a missing store root is a no-op', async () => {
+  const store = new TurnStore('/tmp/does-not-exist-retention', opts)
+  const removed = await store.prune({ retainDays: 1, maxSessions: 1 })
+  assert.deepEqual(removed, { sessions: 0, turns: 0 })
+})

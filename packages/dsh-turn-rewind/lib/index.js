@@ -40,6 +40,10 @@ export const Config = z.object({
   storeDir: z.string().default(''),
   maxFileBytes: z.number().default(2 * 1024 * 1024),
   maxFilesPerTurn: z.number().default(200),
+  /** Days a session's snapshots are kept. 0 disables pruning. */
+  retainDays: z.number().default(14),
+  /** Maximum sessions kept, oldest pruned first. 0 disables the cap. */
+  maxSessions: z.number().default(50),
   timeoutMs: z.number().default(60000),
 })
 
@@ -163,6 +167,77 @@ export class TurnStore {
     this.turns.delete(`${sessionId}\u0000${turn}`)
     await rm(this.dirFor(sessionId, turn), { recursive: true, force: true })
   }
+
+  /**
+   * Drop snapshots that fell out of the retention window.
+   *
+   * Snapshots exist to make a recent mistake recoverable; they are not history.
+   * Without this the store grows for the life of the machine, one copy per
+   * touched file per turn.
+   *
+   * @param {{ retainDays: number, maxSessions: number }} limits - retention policy.
+   * @param {number} now - current epoch milliseconds, injectable for tests.
+   * @returns {Promise<{ sessions: number, turns: number }>} what was removed.
+   */
+  async prune(limits, now = Date.now()) {
+    const cutoff = limits.retainDays > 0 ? now - limits.retainDays * 86400000 : undefined
+    let removedSessions = 0
+    let removedTurns = 0
+
+    let sessions
+    try {
+      sessions = await readdir(this.root, { withFileTypes: true })
+    } catch {
+      return { sessions: 0, turns: 0 }
+    }
+    const live = []
+    for (const entry of sessions) {
+      if (!entry.isDirectory()) continue
+      const sessionDir = join(this.root, entry.name)
+      let newest = 0
+      let turns
+      try {
+        turns = await readdir(sessionDir, { withFileTypes: true })
+      } catch {
+        continue
+      }
+      for (const turn of turns) {
+        if (!turn.isDirectory() || !/^\d+$/.test(turn.name)) continue
+        const turnDir = join(sessionDir, turn.name)
+        let stamp
+        try {
+          stamp = (await stat(join(turnDir, 'manifest.json'))).mtimeMs
+        } catch {
+          continue
+        }
+        newest = Math.max(newest, stamp)
+        if (cutoff !== undefined && stamp < cutoff) {
+          await rm(turnDir, { recursive: true, force: true })
+          removedTurns += 1
+        }
+      }
+      if (cutoff !== undefined) {
+        // A session whose every turn expired leaves an empty directory behind.
+        const left = await readdir(sessionDir).catch(() => [])
+        if (left.length === 0) {
+          await rm(sessionDir, { recursive: true, force: true })
+          removedSessions += 1
+          continue
+        }
+      }
+      live.push({ name: entry.name, newest })
+    }
+
+    // Oldest-first session cap, independent of the age window.
+    if (limits.maxSessions > 0 && live.length > limits.maxSessions) {
+      live.sort((left, right) => left.newest - right.newest)
+      for (const stale of live.slice(0, live.length - limits.maxSessions)) {
+        await rm(join(this.root, stale.name), { recursive: true, force: true })
+        removedSessions += 1
+      }
+    }
+    return { sessions: removedSessions, turns: removedTurns }
+  }
 }
 
 /**
@@ -254,6 +329,22 @@ export function apply(ctx, config) {
     if (typeof sessionId !== 'string') return
     openTurns.delete(`${sessionId}\u0000${turn}`)
   })
+
+  // Prune once at load, not per turn: the window is measured in days, so a
+  // per-turn sweep would cost a directory walk for no benefit. A failure here
+  // must not block startup — the store is advisory.
+  void store
+    .prune({ retainDays: config.retainDays, maxSessions: config.maxSessions })
+    .then((removed) => {
+      if (removed.turns > 0 || removed.sessions > 0) {
+        ctx.logger?.info?.(
+          `turn-rewind: pruned ${removed.turns} expired turn(s) across ${removed.sessions} session(s)`,
+        )
+      }
+    })
+    .catch((error) => {
+      ctx.logger?.warn?.(`turn-rewind: prune failed: ${String(error)}`)
+    })
 
   ctx.on('dispose', () => {
     openTurns.clear()

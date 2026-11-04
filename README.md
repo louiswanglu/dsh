@@ -217,6 +217,38 @@ EXIT 2      ← 正确拦截
 实测：从 lighting-rust 启动 → 绑定它的 `.claude/settings.json`；
 从其它仓库启动 → 无 hooks、零报错、优雅降级。
 
+## 第六轮：收口三个真实缺陷
+
+这轮不是加功能，是修前几轮留下的问题。三个都是实测出来的。
+
+### 6.1 rewind 存储无限增长（存储泄漏）
+
+`TurnStore.discard()` 写好了但**从未被调用**，是死代码。快照只进不出，
+一台机器用久了会一直涨。
+
+修复：加 `prune(retainDays, maxSessions)`，插件加载时跑一次
+（窗口按天算，没必要每轮扫目录）。默认保留 14 天 / 最多 50 个会话。
+`retainDays: 0` 或 `maxSessions: 0` 可分别关闭对应策略。
+
+### 6.2 测试代码仍然压过实现（检索质量）
+
+上一轮用了 `+3.0` 的**加性**惩罚，实测不够：
+
+```
+bm25  raw        +3.0 后      符号
+-30.64  →  -27.64          test_freeze_balance_insufficient
+-18.27  →  -18.27          freeze_balance_for_trading   ← 真实实现反而排后
+```
+
+bm25 是**负数、越负越好**，强匹配的测试可以领先实现十几分，固定加值永远追不上。
+
+修复：改**乘性**降权（测试分 × 0.15），把测试整体压到实现之后。
+现在 `freeze balance insufficient` 返回 `freeze_balance_for_trading`。
+
+### 6.3 仓库没忽略派生索引
+
+`.dsh/codebase-index.sqlite` 会被误提交。已加入 `.gitignore`。
+
 ## 下一步（尚未做）
 
 1. **模型分工** —— 默认走便宜模型，plan/review 走强模型

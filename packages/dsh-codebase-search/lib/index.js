@@ -613,12 +613,20 @@ export class CodebaseIndex {
     const match = ftsQuery(query)
     if (match === '') return []
     // Tests are legitimate matches, but a model asking "how does X work" wants
-    // the implementation first. Demote, never drop: `is_test` shifts rank and
-    // is exposed so the caller can see why a row sorted where it did.
+    // the implementation first. Demote, never drop.
+    //
+    // The demotion is multiplicative, not additive: bm25 returns NEGATIVE
+    // numbers where more negative is better, and a strong test match can be
+    // several points ahead of the implementation. A constant penalty tuned for
+    // one corpus then lets tests win in another. Scaling the score toward zero
+    // pushes every test row behind every production row that matched.
     return db.prepare(`
       SELECT path AS file, symbol, body, start_line, end_line, language,
              is_test,
-             bm25(chunks, 1.0, 4.0, 2.0) + (is_test * 3.0) AS score
+             CASE WHEN is_test = 1
+                  THEN bm25(chunks, 1.0, 4.0, 2.0) * 0.15
+                  ELSE bm25(chunks, 1.0, 4.0, 2.0)
+             END AS score
       FROM chunks
       WHERE chunks MATCH ?
       ORDER BY score
