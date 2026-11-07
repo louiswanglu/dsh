@@ -23,6 +23,18 @@ whenToUse: 需要修改 2 个以上文件，或改动涉及你不熟悉的代码
 
 > 回滚点按 turn 自动记录，不需要你手动存档。你只需要在**要撤的时候**知道撤到哪一轮。
 
+### 顺带：进目录用 `working_directory`，不要拼 `cd`
+
+```
+working_directory({ cd: "/path/to/repo" })
+bash({ command: "git status" })      // 不要写成 cd /path/to/repo && git status
+```
+
+实测本机历史会话：bash 占全部工具调用的 84%，其中 37672 次以 `cd &&` 开头，
+而 `working_directory` 只用了 105 次。这让每轮平均膨胀到 19 步。
+
+用 `working_directory` 一次设定、会话内持久，命令字符串稳定也更省缓存。
+
 ---
 
 ## 第 1 步：用 `codebase_search` 定位，不要用 `grep` 开场
