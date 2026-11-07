@@ -90,10 +90,17 @@
             name: Claude-Opus-5.5
             contextWindow: 1000000
             maxTokens: 128000
+            # 已验证网关支持图片输入（实测 8x8 PNG 识别正确）。DSH 的 pi-ai 适配器
+            # 在未声明 input 时默认只接受 text，因此必须显式声明，否则图片在模型层被拒。
+            # Verified against the gateway with a real PNG. pi-ai defaults to text-only
+            # when input is absent, so images are refused at the model layer without this.
+            input: [text, image]
           - id: deepseek-v4.1-flash
             name: DeepSeek V4.1 Flash
             contextWindow: 1000000
             maxTokens: 384000
+            # 同 claude-opus-5-5：实测支持图片输入 / Verified image support, same as above.
+            input: [text, image]
           - id: gemini-4-argon
             name: Gemini 4 Argon
             contextWindow: 1000000
