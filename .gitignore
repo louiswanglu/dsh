@@ -33,3 +33,5 @@ packages/*/node_modules/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+packages/*/node_modules/
+packages/*/pnpm-lock.yaml
