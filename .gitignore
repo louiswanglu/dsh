@@ -35,3 +35,7 @@ packages/*/node_modules/
 *.sqlite-wal
 packages/*/node_modules/
 packages/*/pnpm-lock.yaml
+
+# 个人 profile 快照可能含内网地址与私有配置，不入库
+# Personal profile snapshots may contain internal endpoints; keep them out of git.
+config/web-profile.patch.yml
