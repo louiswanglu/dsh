@@ -39,3 +39,8 @@ packages/*/pnpm-lock.yaml
 # 个人 profile 快照可能含内网地址与私有配置，不入库
 # Personal profile snapshots may contain internal endpoints; keep them out of git.
 config/web-profile.patch.yml
+
+# Local LSP runtime (tsserver/pyright shims referenced by config/web-lsp.patch.yml)
+# Derived: `npm install` inside .lsp-runtime reproduces it, never committed.
+.lsp-runtime/
+packages/*/node_modules

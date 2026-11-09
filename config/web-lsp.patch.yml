@@ -23,10 +23,25 @@
             allFeatures: false
 
       # ── TypeScript / JavaScript ─────────────────────────────────────────
-      # One server covers .ts/.tsx/.js/.jsx/.mjs/.cjs; it resolves the
-      # workspace's own typescript package through its `tsdk` init option.
+      # One server covers .ts/.tsx/.js/.jsx/.mjs/.cjs.
+      #
+      # `tsserver.path` is pinned so the server does not depend on the target
+      # repository carrying its own typescript package. typescript-language-server
+      # looks for typescript in the WORKSPACE first; in a repository with none
+      # (this Rust one, for example) that lookup fails at initialize with
+      # "Could not find a valid TypeScript installation" and every .ts file
+      # silently yields zero diagnostics.
+      #
+      # Honest scope: with the current layout the pin is belt-and-braces, not the
+      # thing that makes it work. typescript-language-server also falls back to
+      # the typescript installed next to itself, and `.lsp-runtime` provides that
+      # sibling. Both paths were verified against a real server: initialize plus
+      # didOpen on a file with a deliberate type error returns the error with the
+      # pin and without it. The pin is kept because it is the only one of the two
+      # that survives moving or reinstalling the language server, and because the
+      # failure it prevents is silent.
       typescript:
-        command: /Users/wanglu/Documents/Code/dsh/.lsp-runtime/.bin/typescript-language-server
+        command: /Users/wanglu/Documents/Code/dsh/.lsp-runtime/node_modules/.bin/typescript-language-server
         args: ["--stdio"]
         extensionToLanguage:
           .ts: typescript
@@ -38,6 +53,10 @@
         projectMarkers: ["tsconfig.json", "jsconfig.json", "package.json"]
         initializationOptions:
           hostInfo: "dsh-edit-verify"
+          # Pinned per the note above: keeps the server working even if the
+          # target repository has no typescript of its own.
+          tsserver:
+            path: /Users/wanglu/Documents/Code/dsh/.lsp-runtime/node_modules/typescript/lib/tsserver.js
           preferences:
             includeInlayParameterNameHints: "none"
 
@@ -45,7 +64,7 @@
       # pyright requires an explicit transport; it reads pyproject.toml,
       # pyrightconfig.json, and setup.py for its project layout.
       python:
-        command: /Users/wanglu/Documents/Code/dsh/.lsp-runtime/.bin/pyright-langserver
+        command: /Users/wanglu/Documents/Code/dsh/.lsp-runtime/node_modules/.bin/pyright-langserver
         args: ["--stdio"]
         extensionToLanguage:
           .py: python
